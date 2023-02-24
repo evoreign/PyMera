@@ -1,7 +1,11 @@
 # import only system from os
 from configparser import Interpolation
 from os import system, name
-  
+import time 
+from numpy import stack, where
+from cv2 import bitwise_and, bitwise_not,GaussianBlur,fillPoly,imread, INTER_LANCZOS4,INTER_AREA,INTER_NEAREST,resize,fastNlMeansDenoisingColored,VideoCapture, CAP_PROP_FRAME_HEIGHT, CAP_PROP_FRAME_WIDTH, CAP_PROP_FPS, cvtColor, COLOR_BGR2GRAY, createCLAHE, COLOR_BGR2RGB, COLOR_RGB2BGR
+from mediapipe import solutions
+from pyvirtualcam import PixelFormat, Camera
 # define our clear function
 def clear():
   
@@ -12,7 +16,31 @@ def clear():
     # for mac and linux(here, os.name is 'posix')
     else:
         _ = system('clear')
+
+
+mp_selfie_segmentation = solutions.selfie_segmentation
+
+def blur_background(image):
+    image = resize(image, (0, 0), fx=0.5, fy=0.5, interpolation=INTER_LANCZOS4)
+    with mp_selfie_segmentation.SelfieSegmentation(
+        model_selection=1) as selfie_segmentation:
+        image = cvtColor(image, COLOR_BGR2RGB)
+        image.flags.writeable = False
+        results = selfie_segmentation.process(image)
+        image = cvtColor(image, COLOR_RGB2BGR)
+
+        # Draw selfie segmentation on the background image.
+        condition = stack(
+            (results.segmentation_mask,) * 3, axis=-1) > 0.1
+
+        # Blur the background using Gaussian blur
+        blurred = GaussianBlur(image, (55, 55), 0)
+
+        output_image = where(condition, image, blurred)
+        output_image = resize(output_image, (0, 0), fx=2, fy=2, interpolation=INTER_LANCZOS4)
+        return output_image
 clear()
+
 banner = '''
 ───────────────────────────────────────────────────────────────────────────────────────────────────────────
 ─██████████████─████████──████████─██████──────────██████─██████████████─████████████████───██████████████─
@@ -38,18 +66,11 @@ print("If you want to exit, press ctrl+c or just close the window.\n")
 print("Running... Please wait a bit ~5sec...")
 
 
-import time 
 start = time.time()
-from cv2 import INTER_AREA,INTER_NEAREST,resize,fastNlMeansDenoisingColored,VideoCapture, CAP_PROP_FRAME_HEIGHT, CAP_PROP_FRAME_WIDTH, CAP_PROP_FPS, cvtColor, COLOR_BGR2GRAY, createCLAHE, COLOR_BGR2RGB, COLOR_RGB2BGR
-from mediapipe import solutions
-from pyvirtualcam import PixelFormat, Camera
-
+mp_drawing = solutions.drawing_utils
+mp_selfie_segmentation = solutions.selfie_segmentation
+BG_COLOR = (192, 192, 192) # gray
 vc = VideoCapture(0)
-# import cv2
-# sr = cv2.dnn_superres.DnnSuperResImpl_create()
-# path = "FSRCNN_x4.pb"
-# sr.readModel(path)
-# sr.setModel("fsrcnn", 4)
 if not vc.isOpened():
     raise RuntimeError('Could not open video source')
     
@@ -58,22 +79,17 @@ baricentro_x = []
 baricentro_y = []    
 pref_width = 2560
 pref_height = 1440
-pref_fps = 30
+pref_fps = 60
 vc.set(CAP_PROP_FRAME_WIDTH, pref_width)
 vc.set(CAP_PROP_FRAME_HEIGHT, pref_height)
 vc.set(CAP_PROP_FPS, pref_fps)
-frame_width = int(vc.get(CAP_PROP_FRAME_WIDTH))
-frame_height = int(vc.get(CAP_PROP_FRAME_HEIGHT))
-frame_fps = int(vc.get(CAP_PROP_FPS))
+frame_width, frame_height, frame_fps = [int(vc.get(i)) for i in [CAP_PROP_FRAME_WIDTH, CAP_PROP_FRAME_HEIGHT, CAP_PROP_FPS]]
 clahe = createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
-# vc.set(frame_width, pref_width)
-# vc.set(frame_height, pref_height)
-# vc.set(frame_fps, pref_fps)
 
 width = frame_width
 height = frame_height
 fps = 30
-zoom_scale = 1.2
+zoom_scale = 1.5
 width_out = int(width/zoom_scale)
 height_out = int(height/zoom_scale)
 start_x = 0
@@ -97,7 +113,7 @@ print(f'Height: {height_out}PX')
 print(f'Width: {width_out}PX')
 print(f'Active Area: {round(1/zoom_scale,2)}%\n')
 print('-----------------------------------------------------')
-
+import numpy as np
 end = time.time()
 print("Camera starting time:",end - start)
 scale_percent = 50 # percent of original size
@@ -125,13 +141,11 @@ with solutions.face_mesh.FaceMesh(
             dim = (width_downscale, height_downscale)
 
             #downscale gray for faster processing
-            gray_downscale = resize(gray, dim, interpolation = INTER_NEAREST)
+            gray_downscale = resize(gray, dim, interpolation = INTER_LANCZOS4)
             equalize_frame = clahe.apply(gray)
             equalize_frame = cvtColor(equalize_frame, COLOR_BGR2RGB)
-            #image = cvtColor(image, COLOR_BGR2RGB)
             results = face_mesh.process(equalize_frame)
             image.flags.writeable = False
-            #image = cvtColor(image, COLOR_RGB2BGR)
 
             if results.multi_face_landmarks:
                 for face_landmarks in results.multi_face_landmarks:
@@ -180,19 +194,10 @@ with solutions.face_mesh.FaceMesh(
                     stop_x = x_face + width_out/2
 
                 image_crop = image[int(start_y):int(stop_y), int(start_x):int(stop_x), :]
-                #upscale the image back to output resolution
-                #image_crop = resize(image_crop, (0,0), fx=height_out, fy=width_out, interpolation = INTER_AREA)
-                
-                #denoising algorithm ucomment if you have a good gpu
-                #image_crop = fastNlMeansDenoisingColored(image_crop, None, 3, 3, 1, 2)
-
-                #upsample video uncomment if you have a good gpu
-                #image_crop = sr.upsample(image_crop)
-                #image_crop = image_crop[int(start_y):int(stop_y), int(start_x):int(stop_x), :]
-                #image_crop = resize(image_crop, (width_out, height_out), interpolation=INTER_AREA)
+                #selfie segmentation
+                image_crop = blur_background(image_crop)
             else:
-                image_crop = resize(image, (width_out, height_out), interpolation=INTER_AREA)
-                #image_crop = image[int(start_y):int(stop_y), int(start_x):int(stop_x), :]
-
+                image_crop = resize(image, (width_out, height_out), interpolation=INTER_LANCZOS4)
+                image_crop = blur_background(image_crop)
             cam.send(image_crop)
             cam.sleep_until_next_frame()
