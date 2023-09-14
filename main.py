@@ -195,9 +195,9 @@ with solutions.face_mesh.FaceMesh(
 
                 image_crop = image[int(start_y):int(stop_y), int(start_x):int(stop_x), :]
                 #selfie segmentation
-                image_crop = blur_background(image_crop)
+                #image_crop = blur_background(image_crop)
             else:
                 image_crop = resize(image, (width_out, height_out), interpolation=INTER_LANCZOS4)
-                image_crop = blur_background(image_crop)
+                #image_crop = blur_background(image_crop)
             cam.send(image_crop)
             cam.sleep_until_next_frame()
